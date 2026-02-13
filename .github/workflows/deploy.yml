@@ -38,7 +38,7 @@ jobs:
           username: ${{ secrets.PUBLIC_USER }}
           key: ${{ secrets.PUBLIC_SSH_KEY }}
           source: "client/dist/**"
-          target: "/usr/share/nginx/html" # Nginx 경로 확인 필요 (우분투라면 /var/www/html 일 수도 있음)
+          target: "/usr/share/nginx/html/myweb"
           strip_components: 2
 
       # Nginx 재시작
