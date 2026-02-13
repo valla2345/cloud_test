@@ -68,7 +68,7 @@ jobs:
         username: ${{ secrets.PUBLIC_USER }}
         key: ${{ secrets.PUBLIC_SSH_KEY }}
         script: |
-          # ▼▼▼ 여기에 mypri-server-test의 Private IP를 입력하세요 ▼▼▼
+          # mypri-server-test의 Private IP
           PRIVATE_IP="10.0.20.7" 
           
           # Public -> Private 접속 및 배포 스크립트
