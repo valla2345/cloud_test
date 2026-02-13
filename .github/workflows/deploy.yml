@@ -41,18 +41,24 @@ jobs:
           target: "/usr/share/nginx/html/myweb"
           strip_components: 2
 
-      - name: Fix Permissions
+      # 권한 및 보안 설정
+      - name: Fix Permissions & SELinux
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.PUBLIC_HOST }}
           username: ${{ secrets.PUBLIC_USER }}
           key: ${{ secrets.PUBLIC_SSH_KEY }}
           script: |
-            # 1. 폴더와 파일의 권한을 755로 변경
+            # 1. 권한을 755로 변경
             chmod -R 755 /usr/share/nginx/html/myweb
             
-            # 2. SELinux 보안 문맥 복구
-            restorecon -R /usr/share/nginx/html/myweb || true
+            # 2. 소유자를 nginx로 변경
+            chown -R nginx:nginx /usr/share/nginx/html/myweb || chown -R www-data:www-data /usr/share/nginx/html/myweb || true
+            
+            # 3. SELinux 보안 문맥 복구
+            if command -v restorecon >/dev/null 2>&1; then
+              restorecon -R /usr/share/nginx/html/myweb
+            fi
 
       # Nginx 재시작
       - name: Reload Nginx
