@@ -1,16 +1,12 @@
-# 1. 업무 매뉴얼 이름 설정
-name : Nginx + Node + React Deployment
+name: Nginx + Node + React Deployment
 
-# 2. 업무 매뉴얼 동작 시점 설정
-on :
-    push:
-        branches : ["main"]
-    workflow_dispatch:
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
 
-# 3. 업무 매뉴얼을 더 작은 단위로 쪼개서, 해야 할 일을 작성
 jobs:
-  # 1) 프론트(React/Vite) 빌드 & Public(Nginx) 배포
-  # 배포되는 환경에 대해서 기본적인 설정을 잡아놓는 공간
+  # 1) 프론트엔드 배포 (Public 서버: myweb-server-test)
   build-and-deploy-frontend:
     runs-on: ubuntu-latest
     defaults:
@@ -18,51 +14,35 @@ jobs:
         shell: bash
 
     steps:
-      # (1) 레포 체크아웃
       - name: Checkout
-      # users --> 이미 잘 짜여진 코드를 가져와서 실행
         uses: actions/checkout@v4
 
-      # (2) React 빌드용 Node 세팅
-      - name: Setup Node (for building React)
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "20"
           cache: "npm"
           cache-dependency-path: client/package-lock.json
 
-      # (3) React 빌드 -> client/dist 생성
-      - name: Build React (client/dist)
+      - name: Build React
         working-directory: client
         run: |
           npm ci
           npm run build
-          test -d dist
 
-      # (4-0) Public 서버에 dist 업로드 받을 폴더 생성
-      - name: Ensure web root exists on Public
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.PUBLIC_HOST }}
-          username: ${{ secrets.PUBLIC_USER }}
-          key: ${{ secrets.PUBLIC_SSH_KEY }}
-          script: |
-            sudo mkdir -p "/usr/share/nginx/html"
-            sudo chown -R $USER:$USER "/usr/share/nginx/html" || true
-
-      # (4) dist를 Public 서버 Nginx root로 업로드
-      - name: Upload dist to Public Server (Nginx web root)
+      # Public 서버로 파일 전송
+      - name: Upload to Public Server
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.PUBLIC_HOST }}
           username: ${{ secrets.PUBLIC_USER }}
           key: ${{ secrets.PUBLIC_SSH_KEY }}
           source: "client/dist/**"
-          target: "/usr/share/nginx/html"
+          target: "/usr/share/nginx/html" # Nginx 경로 확인 필요 (우분투라면 /var/www/html 일 수도 있음)
           strip_components: 2
 
-      # (5) nginx 설정 검사 후 reload
-      - name: Reload Nginx on Public
+      # Nginx 재시작
+      - name: Reload Nginx
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.PUBLIC_HOST }}
@@ -72,8 +52,7 @@ jobs:
             sudo nginx -t
             sudo systemctl reload nginx
 
-
-  # 2) 백엔드(Node/PM2) Private 서버 배포 (Public을 Bastion으로 경유)
+  # 2) 백엔드 배포 (Private 서버: mypri-server-test)
   deploy-backend:
     runs-on: ubuntu-latest
     needs: [build-and-deploy-frontend]
@@ -82,42 +61,40 @@ jobs:
         shell: bash
 
     steps:
-    - name: Deploy backend to Private via Public (Bastion)
+    - name: Deploy to Private via Public
       uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.PUBLIC_HOST }}
         username: ${{ secrets.PUBLIC_USER }}
         key: ${{ secrets.PUBLIC_SSH_KEY }}
         script: |
-          set -e
-
-          # Public -> Private 접속
-          ssh -o StrictHostKeyChecking=no root@10.0.20.7 "bash -lc '
-            set -e
-
-            # (1) nvm 로드 (비로그인 쉘에서도 node/npm 사용 가능하게)
+          # ▼▼▼ 여기에 mypri-server-test의 Private IP를 입력하세요 ▼▼▼
+          PRIVATE_IP="10.0.20.7" 
+          
+          # Public -> Private 접속 및 배포 스크립트
+          ssh -o StrictHostKeyChecking=no root@$PRIVATE_IP "bash -lc '
+            # 1. 환경 설정
             export NVM_DIR=\"\$HOME/.nvm\"
             [ -s \"\$NVM_DIR/nvm.sh\" ] && . \"\$NVM_DIR/nvm.sh\"
+            
+            # 2. 프로젝트 폴더 설정
+            REPO_URL=\"https://github.com/valla2345/cloud_test.git\"
+            APP_DIR=\"/root/cloud_test\"
 
-            # (2) 원하는 Node 버전 활성화
-            nvm use --lts
-
-            # (3) 레포 동기화
-           REPO_URL=\"${{ secrets.REPO_URL }}\"
-            APP_DIR=\"${{ secrets.PRIVATE_APP_DIR }}\"
-
+            # 3. 코드 다운로드 (Clone 또는 Pull)
             if [ ! -d \"\$APP_DIR/.git\" ]; then
               git clone \"\$REPO_URL\" \"\$APP_DIR\"
+            else
+              cd \"\$APP_DIR\"
+              git fetch --all
+              git reset --hard origin/main
             fi
 
-            cd \"\$APP_DIR\"
-            git fetch --all
-            git reset --hard origin/main
-
-            # (4) 백엔드 의존성 설치 + PM2 재기동
+            # 4. 백엔드 서버 재시작
             cd \"\$APP_DIR/server\"
             npm ci --omit=dev
 
+            # 이미 실행 중이면 재시작, 아니면 새로 시작
             pm2 describe myproj-server >/dev/null 2>&1 \
               && pm2 reload myproj-server \
               || pm2 start server.js --name myproj-server
